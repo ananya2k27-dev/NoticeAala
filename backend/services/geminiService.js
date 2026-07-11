@@ -1,6 +1,6 @@
 const axios = require("axios");
 
-const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_MODEL = "gemini-3.1-flash-lite";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const EXTRACTION_PROMPT = `You are an assistant that reads Indian college notices (which may be photos of notice boards, WhatsApp screenshots, or scanned PDFs, and may mix Hindi and English).
