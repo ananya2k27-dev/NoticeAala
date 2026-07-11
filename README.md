@@ -120,9 +120,12 @@ In Render's environment variables for the backend, set `FRONTEND_URL` to your de
 
 ---
 
-## Notes / known limitations (good to mention honestly in interviews)
+## Notes / known limitations 
 
 - Uses Twilio's **WhatsApp Sandbox**, which is free for development but requires each tester to join the sandbox first (`join <code>`). A production WhatsApp Business API would remove that step but requires business verification.
-- Dashboard identifies students by phone number only — no OTP/password auth in this MVP. A natural next step would be adding JWT-based auth like in your other projects.
+- Dashboard identifies students by phone number only — no OTP/password auth in this MVP. A natural next step would be adding JWT-based auth.
 - If Gemini's extraction confidence is low (blurry photo, handwriting), it still returns its best guess — a future improvement would be flagging low-confidence extractions for manual review instead of silently trusting them.
-- Render free tier spins down on inactivity, so the first webhook call after idle time may be slow (a few seconds) — worth knowing before a live demo.
+- Render free tier spins down on inactivity, so the first webhook call after idle time may be slow (a few seconds).
+
+**Author
+-Ananya
