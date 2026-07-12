@@ -85,4 +85,68 @@ async function extractNoticeDetails(base64Data, mimeType) {
   };
 }
 
-module.exports = { extractNoticeDetails };
+const REVISION_PROMPT_PREFIX = `You are correcting a previously extracted college notice reminder based on user feedback.
+
+Here is the existing reminder JSON:
+`;
+
+const REVISION_PROMPT_SUFFIX = `
+
+The user sent this correction message. Apply ONLY the change they're describing, keep everything else the same. Return ONLY valid JSON, no markdown fences, in the exact same shape as the input JSON above (title, category, eventDate, eventTime, actionRequired, urgency, summary).`;
+
+/**
+ * Revises an existing reminder's JSON based on a plain-text correction from the user.
+ * @param {object} existingReminder - plain object with title, category, eventDate, eventTime, actionRequired, urgency, summary
+ * @param {string} correctionText - user's WhatsApp message, e.g. "no it's the 25th not 20th"
+ */
+async function reviseNoticeDetails(existingReminder, correctionText) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not set");
+  }
+
+  const promptText =
+    REVISION_PROMPT_PREFIX +
+    JSON.stringify(existingReminder) +
+    `\n\nUser's correction: "${correctionText}"` +
+    REVISION_PROMPT_SUFFIX;
+
+  const response = await axios.post(
+    `${GEMINI_URL}?key=${apiKey}`,
+    {
+      contents: [{ parts: [{ text: promptText }] }],
+      generationConfig: {
+        temperature: 0.2,
+        responseMimeType: "application/json",
+      },
+    },
+    { headers: { "Content-Type": "application/json" } }
+  );
+
+  const rawText =
+    response.data?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (err) {
+    const cleaned = rawText.replace(/```json|```/g, "").trim();
+    parsed = JSON.parse(cleaned);
+  }
+
+  return {
+    title: parsed.title || existingReminder.title,
+    category: ["exam", "fee", "placement", "event", "other"].includes(parsed.category)
+      ? parsed.category
+      : existingReminder.category,
+    eventDate: parsed.eventDate || "",
+    eventTime: parsed.eventTime || "",
+    actionRequired: parsed.actionRequired || "",
+    urgency: ["low", "medium", "high"].includes(parsed.urgency)
+      ? parsed.urgency
+      : existingReminder.urgency,
+    summary: parsed.summary || existingReminder.summary,
+  };
+}
+
+module.exports = { extractNoticeDetails ,reviseNoticeDetails};
