@@ -1,5 +1,6 @@
 const Reminder = require("../models/Reminder");
 const Subscriber = require("../models/Subscriber");
+const SectionRequest = require("../models/SectionRequest");
 const { extractNoticeDetails, reviseNoticeDetails } = require("../services/geminiService");
 const {
   downloadMediaAsBase64,
@@ -19,6 +20,35 @@ function looksLikeCorrection(text) {
   return CORRECTION_KEYWORDS.some((kw) => lower.startsWith(kw));
 }
 
+function normalizeAdminPhone(raw) {
+  const trimmed = raw.trim();
+  return trimmed.startsWith("whatsapp:") ? trimmed : `whatsapp:${trimmed}`;
+}
+
+async function notifyAdmins(text) {
+  for (const admin of ADMIN_NUMBERS) {
+    try {
+      await sendWhatsAppMessage(admin, text);
+    } catch (err) {
+      console.error(`Failed to notify admin ${admin}:`, err.message);
+    }
+  }
+}
+
+// Lets an admin target arbitrary sections from WhatsApp, the same way the dashboard's
+// Admin panel lets them pick any section(s) instead of only their own. Caption examples:
+//   "to: CSE-DS-3, CSE-DS-4"
+//   "sections: CSE-DS-3"
+function parseSectionsFromCaption(caption) {
+  const match = caption.match(/^(?:to|section|sections)\s*:\s*(.+)$/i);
+  if (!match) return null;
+  const sections = match[1]
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+  return sections.length ? sections : null;
+}
+
 async function handleWhatsAppWebhook(req, res) {
   res.status(200).send("<Response></Response>");
 
@@ -27,23 +57,91 @@ async function handleWhatsAppWebhook(req, res) {
   const bodyText = (req.body.Body || "").trim();
 
   try {
-    // ---- Text-only messages: handle subscribe / correction / fallback ----
+    // ---- Text-only messages: subscribe / approve / deny / correction / fallback ----
     if (numMedia < 1) {
-      // "subscribe CSE-DS-3"
+      // ---- Admin: "approve +91XXXXXXXXXX" or "deny +91XXXXXXXXXX" ----
+      if (ADMIN_NUMBERS.includes(from) && /^(approve|deny)\s+\S+/i.test(bodyText)) {
+        const [cmd, rawPhone] = bodyText.split(/\s+/);
+        const targetPhone = normalizeAdminPhone(rawPhone);
+        const decision = cmd.toLowerCase() === "approve" ? "approved" : "denied";
+
+        const request = await SectionRequest.findOne({ phoneNumber: targetPhone, status: "pending" });
+        if (!request) {
+          await sendWhatsAppMessage(from, `No pending section request found for ${rawPhone}.`);
+          return;
+        }
+
+        if (decision === "approved") {
+          await Subscriber.findOneAndUpdate(
+            { phoneNumber: targetPhone },
+            { phoneNumber: targetPhone, section: request.requestedSection },
+            { upsert: true }
+          );
+          await sendWhatsAppMessage(
+            targetPhone,
+            `Good news — your teacher approved your move to *${request.requestedSection}*.`
+          );
+        } else {
+          await sendWhatsAppMessage(
+            targetPhone,
+            `Your request to switch to *${request.requestedSection}* was declined by your teacher. You're still in *${request.currentSection}*.`
+          );
+        }
+
+        request.status = decision;
+        request.resolvedBy = "whatsapp";
+        await request.save();
+
+        await sendWhatsAppMessage(
+          from,
+          `${decision === "approved" ? "Approved" : "Denied"}: ${rawPhone} → ${request.requestedSection}.`
+        );
+        return;
+      }
+
+      // ---- "subscribe CSE-DS-3" ----
       if (bodyText.toLowerCase().startsWith("subscribe")) {
-        const section = bodyText.split(/\s+/).slice(1).join(" ").trim();
+        const section = bodyText.split(/\s+/).slice(1).join(" ").trim().toUpperCase();
         if (!section) {
           await sendWhatsAppMessage(from, 'Please tell me your section too, e.g. "subscribe CSE-DS-3".');
           return;
         }
-        await Subscriber.findOneAndUpdate(
-          { phoneNumber: from },
-          { phoneNumber: from, section: section.toUpperCase() },
+
+        const existing = await Subscriber.findOne({ phoneNumber: from });
+
+        // First-ever registration — no approval needed.
+        if (!existing) {
+          await Subscriber.create({ phoneNumber: from, section });
+          await sendWhatsAppMessage(
+            from,
+            `You're subscribed to *${section}*. Your class rep's notices will now reach you automatically.`
+          );
+          return;
+        }
+
+        if (existing.section === section) {
+          await sendWhatsAppMessage(from, `You're already subscribed to *${section}*.`);
+          return;
+        }
+
+        // Already in a different section — switching needs teacher approval.
+        const request = await SectionRequest.findOneAndUpdate(
+          { phoneNumber: from, status: "pending" },
+          {
+            phoneNumber: from,
+            currentSection: existing.section,
+            requestedSection: section,
+            status: "pending",
+          },
           { upsert: true, new: true }
         );
+
         await sendWhatsAppMessage(
           from,
-          `You're subscribed to *${section.toUpperCase()}*. Your class rep's notices will now reach you automatically.`
+          `You're currently in *${existing.section}*. I've sent your request to switch to *${section}* to your teacher — you'll hear back once it's reviewed.`
+        );
+        await notifyAdmins(
+          `Section switch request: ${from} wants to move from ${existing.section} to ${section}.\nReply "approve ${from.replace("whatsapp:", "")}" or "deny ${from.replace("whatsapp:", "")}" to resolve, or use the dashboard.`
         );
         return;
       }
@@ -85,10 +183,12 @@ async function handleWhatsAppWebhook(req, res) {
         return;
       }
 
-      // Fallback — original behavior
+      // Fallback — original behavior, plus a hint about admin commands if relevant
       await sendWhatsAppMessage(
         from,
-        "Send me a photo or PDF of a notice (exam schedule, fee deadline, placement drive, etc.) and I'll turn it into a reminder for you."
+        ADMIN_NUMBERS.includes(from)
+          ? 'Send me a notice photo/PDF to broadcast (add a caption like "to: CSE-DS-3" to target a specific section), or reply "approve <phone>" / "deny <phone>" to resolve a section-switch request.'
+          : "Send me a photo or PDF of a notice (exam schedule, fee deadline, placement drive, etc.) and I'll turn it into a reminder for you."
       );
       return;
     }
@@ -110,23 +210,36 @@ async function handleWhatsAppWebhook(req, res) {
 
     // ---- Admin broadcast path ----
     if (ADMIN_NUMBERS.includes(from)) {
-      const adminSub = await Subscriber.findOne({ phoneNumber: from });
-      if (!adminSub) {
-        await sendWhatsAppMessage(
-          from,
-          'You\'re an admin but not linked to a section yet. Send "subscribe CSE-DS-3" first, then resend the notice.'
-        );
-        return;
+      // A caption like "to: CSE-DS-3, CSE-DS-4" targets arbitrary sections, same as the
+      // dashboard's Admin panel. Without a caption, it falls back to the admin's own section.
+      const captionSections = parseSectionsFromCaption(bodyText);
+      let targetSections;
+
+      if (captionSections) {
+        targetSections = captionSections;
+      } else {
+        const adminSub = await Subscriber.findOne({ phoneNumber: from });
+        if (!adminSub) {
+          await sendWhatsAppMessage(
+            from,
+            'You\'re an admin but not linked to a section yet. Send "subscribe CSE-DS-3" first, or add a caption like "to: CSE-DS-3" to this notice.'
+          );
+          return;
+        }
+        targetSections = [adminSub.section];
       }
 
-      const students = await Subscriber.find({ section: adminSub.section });
+      const students = await Subscriber.find({ section: { $in: targetSections } });
       const recipients = students.length ? students.map((s) => s.phoneNumber) : [from];
+      const sectionForRecipient = new Map(students.map((s) => [s.phoneNumber, s.section]));
 
       for (const phoneNumber of recipients) {
+        const section = sectionForRecipient.get(phoneNumber) || targetSections[0];
         const reminder = await Reminder.create({
           phoneNumber,
           title: extracted.title,
           category: extracted.category,
+          section,
           eventDate: extracted.eventDate ? new Date(extracted.eventDate) : undefined,
           eventTime: extracted.eventTime,
           actionRequired: extracted.actionRequired,
@@ -137,11 +250,14 @@ async function handleWhatsAppWebhook(req, res) {
 
         await sendWhatsAppMessage(
           phoneNumber,
-          `New notice for *${adminSub.section}*:\n\n*${reminder.title}*\n${dateLine}Category: ${reminder.category}\n${extracted.actionRequired ? "Action: " + extracted.actionRequired + "\n" : ""}`
+          `New notice for *${section}*:\n\n*${reminder.title}*\n${dateLine}Category: ${reminder.category}\n${extracted.actionRequired ? "Action: " + extracted.actionRequired + "\n" : ""}`
         );
       }
 
-      await sendWhatsAppMessage(from, `Broadcast sent to ${recipients.length} student(s) in ${adminSub.section}.`);
+      await sendWhatsAppMessage(
+        from,
+        `Broadcast sent to ${recipients.length} student(s) across ${targetSections.join(", ")}.`
+      );
       return;
     }
 

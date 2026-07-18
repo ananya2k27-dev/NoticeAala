@@ -18,6 +18,14 @@ const reminderSchema = new mongoose.Schema(
       enum: ["exam", "fee", "placement", "event", "other"],
       default: "other",
     },
+    // Which class section this reminder was targeted to, if it came from an admin/teacher
+    // broadcast. Empty for reminders a student created themselves by forwarding a notice.
+    section: {
+      type: String,
+      default: "",
+      trim: true,
+      uppercase: true,
+    },
     eventDate: {
       type: Date,
       required: false,
@@ -49,9 +57,16 @@ const reminderSchema = new mongoose.Schema(
       enum: ["pending", "done"],
       default: "pending",
     },
+    // DEPRECATED: kept so existing documents don't break; superseded by nudgeStages below.
     nudgeSent: {
       type: Boolean,
       default: false,
+    },
+    // Tracks which alert "stages" have already fired for this reminder, so the scheduler
+    // never sends the same stage twice. Possible values: "48h", "24h", "12h", "3h".
+    nudgeStages: {
+      type: [String],
+      default: [],
     },
   },
   { timestamps: true }

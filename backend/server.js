@@ -4,6 +4,9 @@ const cors = require("cors");
 const connectDB = require("./config/db");
 const webhookRoutes = require("./routes/webhookRoutes");
 const reminderRoutes = require("./routes/reminderRoutes");
+const broadcastRoutes = require("./routes/broadcastRoutes");
+const subscriberRoutes = require("./routes/subscriberRoutes");
+const sectionRequestRoutes = require("./routes/sectionRequestRoutes");
 const errorHandler = require("./middleware/errorHandler");
 const { startReminderScheduler } = require("./services/reminderScheduler");
 
@@ -19,7 +22,8 @@ app.use(
 
 // Twilio webhooks send form-urlencoded data, not JSON
 app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
+// Notice files come through the dashboard broadcast endpoint as base64 JSON, so allow a larger body
+app.use(express.json({ limit: "15mb" }));
 
 app.get("/", (req, res) => {
   res.json({ status: "Campus Circular Agent backend is running" });
@@ -27,6 +31,9 @@ app.get("/", (req, res) => {
 
 app.use("/api/webhook", webhookRoutes);
 app.use("/api/reminders", reminderRoutes);
+app.use("/api/broadcast", broadcastRoutes);
+app.use("/api/subscribers", subscriberRoutes);
+app.use("/api/section-requests", sectionRequestRoutes);
 
 app.use(errorHandler);
 
