@@ -1,67 +1,58 @@
 import React from "react";
 
-const categoryColors = {
-  exam: "#ef4444",
-  fee: "#f59e0b",
-  placement: "#3b82f6",
-  event: "#10b981",
-  other: "#6b7280",
+const CATEGORY_STYLE = {
+  exam: { color: "var(--cat-exam)", soft: "var(--cat-exam-soft)", emoji: "📝" },
+  fee: { color: "var(--cat-fee)", soft: "var(--cat-fee-soft)", emoji: "💰" },
+  placement: { color: "var(--cat-placement)", soft: "var(--cat-placement-soft)", emoji: "💼" },
+  event: { color: "var(--cat-event)", soft: "var(--cat-event-soft)", emoji: "🎉" },
+  other: { color: "var(--cat-other)", soft: "var(--cat-other-soft)", emoji: "📌" },
 };
 
 export default function ReminderCard({ reminder, onToggleDone, onDelete }) {
-  const color = categoryColors[reminder.category] || categoryColors.other;
+  const style = CATEGORY_STYLE[reminder.category] || CATEGORY_STYLE.other;
+  const isDone = reminder.status === "done";
 
   return (
     <div
-      style={{
-        border: "1px solid #e5e7eb",
-        borderLeft: `5px solid ${color}`,
-        borderRadius: 8,
-        padding: 16,
-        marginBottom: 12,
-        opacity: reminder.status === "done" ? 0.5 : 1,
-        background: "#fff",
-      }}
+      className={`card-surface reminder-card ${isDone ? "done" : ""}`}
+      style={{ "--cat-color": style.color }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+      <div className="reminder-top">
         <div>
-          <h3 style={{ margin: 0, fontSize: 16 }}>{reminder.title}</h3>
-          <span style={{ fontSize: 12, color, textTransform: "uppercase", fontWeight: 600 }}>
-            {reminder.category}
+          <h3 className={`reminder-title ${isDone ? "done" : ""}`}>{reminder.title}</h3>
+          <span
+            className="badge"
+            style={{ background: style.soft, color: style.color, marginTop: 6 }}
+          >
+            {style.emoji} {reminder.category}
           </span>
+          {reminder.section && (
+            <span className="badge" style={{ background: "var(--primary-soft)", color: "var(--primary-dark)", marginLeft: 6, marginTop: 6 }}>
+              {reminder.section}
+            </span>
+          )}
         </div>
-        <span style={{ fontSize: 12, color: "#6b7280" }}>{reminder.urgency} urgency</span>
+        <span className={`urgency-badge ${reminder.urgency === "high" ? "high" : ""}`}>
+          {reminder.urgency} urgency
+        </span>
       </div>
 
       {reminder.eventDate && (
-        <p style={{ margin: "8px 0 0", fontSize: 14 }}>
+        <p className="reminder-meta">
           📅 {new Date(reminder.eventDate).toDateString()} {reminder.eventTime}
         </p>
       )}
-      {reminder.actionRequired && (
-        <p style={{ margin: "4px 0 0", fontSize: 14 }}>✅ {reminder.actionRequired}</p>
-      )}
-      {reminder.summary && (
-        <p style={{ margin: "8px 0 0", fontSize: 13, color: "#4b5563" }}>{reminder.summary}</p>
-      )}
+      {reminder.actionRequired && <p className="reminder-meta">✅ {reminder.actionRequired}</p>}
+      {reminder.summary && <p className="reminder-summary">{reminder.summary}</p>}
 
-      <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-        <button onClick={() => onToggleDone(reminder)} style={btnStyle}>
-          {reminder.status === "done" ? "Mark pending" : "Mark done"}
+      <div className="reminder-actions">
+        <button className="icon-btn" onClick={() => onToggleDone(reminder)}>
+          {isDone ? "Mark pending" : "Mark done"}
         </button>
-        <button onClick={() => onDelete(reminder)} style={{ ...btnStyle, color: "#ef4444" }}>
+        <button className="icon-btn danger" onClick={() => onDelete(reminder)}>
           Delete
         </button>
       </div>
     </div>
   );
 }
-
-const btnStyle = {
-  fontSize: 13,
-  padding: "6px 12px",
-  border: "1px solid #e5e7eb",
-  borderRadius: 6,
-  background: "#f9fafb",
-  cursor: "pointer",
-};

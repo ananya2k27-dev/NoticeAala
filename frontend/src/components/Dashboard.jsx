@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { fetchReminders, updateReminder, deleteReminder } from "../api/api";
 import ReminderCard from "./ReminderCard";
 
+const CATEGORIES = ["all", "exam", "fee", "placement", "event", "other"];
+
 export default function Dashboard({ phone, onLogout }) {
   const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -21,70 +23,111 @@ export default function Dashboard({ phone, onLogout }) {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phone]);
 
   const handleToggleDone = async (reminder) => {
     const newStatus = reminder.status === "done" ? "pending" : "done";
+    setReminders((prev) =>
+      prev.map((r) => (r._id === reminder._id ? { ...r, status: newStatus } : r))
+    );
     await updateReminder(reminder._id, { status: newStatus });
-    load();
   };
 
   const handleDelete = async (reminder) => {
+    setReminders((prev) => prev.filter((r) => r._id !== reminder._id));
     await deleteReminder(reminder._id);
-    load();
   };
 
   const filtered =
     filter === "all" ? reminders : reminders.filter((r) => r.category === filter);
 
-  const categories = ["all", "exam", "fee", "placement", "event", "other"];
+  const pendingCount = reminders.filter((r) => r.status !== "done").length;
+  const now = new Date();
+  const dueSoonCount = reminders.filter(
+    (r) =>
+      r.status !== "done" &&
+      r.eventDate &&
+      new Date(r.eventDate) - now <= 48 * 60 * 60 * 1000 &&
+      new Date(r.eventDate) - now >= 0
+  ).length;
+  const doneCount = reminders.filter((r) => r.status === "done").length;
 
   return (
-    <div style={{ maxWidth: 700, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0 }}>Your Reminders</h2>
-        <button onClick={onLogout} style={{ fontSize: 13, cursor: "pointer" }}>
+    <div>
+      <div className="dash-header">
+        <div>
+          <h2>Your Reminders</h2>
+          <div className="subtext">{phone}</div>
+        </div>
+        <button className="btn-secondary" onClick={onLogout}>
           Switch number
         </button>
       </div>
-      <p style={{ color: "#6b7280", fontSize: 14 }}>{phone}</p>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        {categories.map((c) => (
+      {!loading && reminders.length > 0 && (
+        <div className="stat-row">
+          <div className="card-surface stat-card">
+            <div className="stat-num">{pendingCount}</div>
+            <div className="stat-label">Pending</div>
+          </div>
+          <div className="card-surface stat-card">
+            <div className="stat-num" style={{ color: dueSoonCount > 0 ? "var(--danger)" : undefined }}>
+              {dueSoonCount}
+            </div>
+            <div className="stat-label">Due in 48h</div>
+          </div>
+          <div className="card-surface stat-card">
+            <div className="stat-num">{doneCount}</div>
+            <div className="stat-label">Completed</div>
+          </div>
+        </div>
+      )}
+
+      <div className="chip-row">
+        {CATEGORIES.map((c) => (
           <button
             key={c}
             onClick={() => setFilter(c)}
-            style={{
-              padding: "6px 12px",
-              borderRadius: 6,
-              border: "1px solid #e5e7eb",
-              background: filter === c ? "#111827" : "#f9fafb",
-              color: filter === c ? "#fff" : "#111827",
-              cursor: "pointer",
-              fontSize: 13,
-              textTransform: "capitalize",
-            }}
+            className={`chip ${filter === c ? "active" : ""}`}
           >
             {c}
           </button>
         ))}
       </div>
 
-      {loading && <p>Loading...</p>}
-      {!loading && filtered.length === 0 && (
-        <p style={{ color: "#6b7280" }}>
-          No reminders yet. Forward a notice photo or PDF to the WhatsApp bot to get started.
-        </p>
+      {loading && (
+        <>
+          <div className="skeleton" />
+          <div className="skeleton" />
+          <div className="skeleton" />
+        </>
       )}
 
-      {filtered.map((r) => (
-        <ReminderCard
-          key={r._id}
-          reminder={r}
-          onToggleDone={handleToggleDone}
-          onDelete={handleDelete}
-        />
-      ))}
+      {!loading && filtered.length === 0 && (
+        <div className="card-surface empty-state">
+          <div className="empty-emoji">📭</div>
+          {reminders.length === 0 ? (
+            <>
+              No reminders yet.
+              <br />
+              Forward a notice photo or PDF to the WhatsApp bot to get started.
+            </>
+          ) : (
+            <>No reminders in this category.</>
+          )}
+        </div>
+      )}
+
+      {!loading &&
+        filtered.map((r) => (
+          <ReminderCard
+            key={r._id}
+            reminder={r}
+            onToggleDone={handleToggleDone}
+            onDelete={handleDelete}
+          />
+        ))}
     </div>
   );
 }
