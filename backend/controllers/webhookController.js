@@ -6,6 +6,7 @@ const {
   downloadMediaAsBase64,
   sendWhatsAppMessage,
 } = require("../services/twilioService");
+const { findDuplicateReminder } = require("../services/dedupService");
 
 // Comma-separated admin numbers set in Render env vars, e.g. "whatsapp:+919876543210,whatsapp:+911234567890"
 const ADMIN_NUMBERS = (process.env.ADMIN_NUMBERS || "")
@@ -233,8 +234,20 @@ async function handleWhatsAppWebhook(req, res) {
       const recipients = students.length ? students.map((s) => s.phoneNumber) : [from];
       const sectionForRecipient = new Map(students.map((s) => [s.phoneNumber, s.section]));
 
+      let skippedDuplicates = 0;
+
       for (const phoneNumber of recipients) {
         const section = sectionForRecipient.get(phoneNumber) || targetSections[0];
+
+        // Skip if this student already has a pending reminder that looks like the same
+        // notice (same category + eventDate, similar title) — most commonly happens when
+        // a notice gets forwarded/rebroadcast slightly reworded.
+        const duplicate = await findDuplicateReminder(phoneNumber, extracted);
+        if (duplicate) {
+          skippedDuplicates += 1;
+          continue;
+        }
+
         const reminder = await Reminder.create({
           phoneNumber,
           title: extracted.title,
@@ -256,12 +269,25 @@ async function handleWhatsAppWebhook(req, res) {
 
       await sendWhatsAppMessage(
         from,
-        `Broadcast sent to ${recipients.length} student(s) across ${targetSections.join(", ")}.`
+        `Broadcast sent to ${recipients.length - skippedDuplicates} student(s) across ${targetSections.join(", ")}` +
+          (skippedDuplicates ? ` (${skippedDuplicates} already had this notice, skipped).` : ".")
       );
       return;
     }
 
-    // ---- Normal single-student path (unchanged) ----
+    // ---- Normal single-student path ----
+    // Same notice often gets forwarded more than once (re-sent by a classmate, or the
+    // student themselves forwards it twice). Check for a near-duplicate before creating
+    // a fresh reminder instead of silently piling up copies.
+    const existingDuplicate = await findDuplicateReminder(from, extracted);
+    if (existingDuplicate) {
+      await sendWhatsAppMessage(
+        from,
+        `You already have a reminder for this:\n\n*${existingDuplicate.title}*\n${dateLine}Category: ${existingDuplicate.category}\n\nI didn't add a duplicate — check your dashboard if anything looks off.`
+      );
+      return;
+    }
+
     const reminder = await Reminder.create({
       phoneNumber: from,
       title: extracted.title,

@@ -2,6 +2,7 @@ const Reminder = require("../models/Reminder");
 const Subscriber = require("../models/Subscriber");
 const { extractNoticeDetails } = require("../services/geminiService");
 const { sendWhatsAppMessage } = require("../services/twilioService");
+const { findDuplicateReminder } = require("../services/dedupService");
 
 const CATEGORIES = ["exam", "fee", "placement", "event", "other"];
 
@@ -57,9 +58,22 @@ async function sendBroadcast(req, res) {
       : "";
 
     let sentCount = 0;
+    let skippedDuplicates = 0;
     const createdReminders = [];
 
     for (const student of students) {
+      // Same guard as the WhatsApp broadcast path: don't create a second reminder for a
+      // student who already has one that looks like the same notice (same category +
+      // eventDate, similar title) — common when a teacher re-sends a slightly reworded notice.
+      const duplicate = await findDuplicateReminder(student.phoneNumber, {
+        ...extracted,
+        category,
+      });
+      if (duplicate) {
+        skippedDuplicates += 1;
+        continue;
+      }
+
       const reminder = await Reminder.create({
         phoneNumber: student.phoneNumber,
         title: extracted.title,
@@ -86,9 +100,12 @@ async function sendBroadcast(req, res) {
     }
 
     res.json({
-      message: `Sent to ${sentCount} of ${students.length} student(s) across ${normalizedSections.join(", ")}`,
+      message:
+        `Sent to ${sentCount} of ${students.length} student(s) across ${normalizedSections.join(", ")}` +
+        (skippedDuplicates ? ` (${skippedDuplicates} already had this notice, skipped)` : ""),
       extracted: { ...extracted, category },
       remindersCreated: createdReminders.length,
+      skippedDuplicates,
     });
   } catch (err) {
     console.error("Broadcast error:", err.message);
