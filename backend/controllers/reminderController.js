@@ -1,50 +1,165 @@
+
+const mongoose = require("mongoose");
 const Reminder = require("../models/Reminder");
 
-// Normalizes phone numbers so the dashboard lookup matches WhatsApp's "whatsapp:+91..." format
-function normalizePhone(phone) {
-  if (!phone) return phone;
-  return phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`;
+// Get the verified phone number from the authenticated user.
+function getVerifiedPhone(req) {
+  if (!req.user || !req.user.phoneVerified || !req.user.phoneNumber) {
+    return null;
+  }
+
+  return req.user.phoneNumber;
 }
 
-// GET /api/reminders?phone=+91XXXXXXXXXX
+// GET /api/reminders
 async function getReminders(req, res) {
   try {
-    const { phone } = req.query;
-    if (!phone) {
-      return res.status(400).json({ message: "phone query param is required" });
+    const phoneNumber = getVerifiedPhone(req);
+
+    if (!phoneNumber) {
+      return res.status(403).json({
+        message: "Link and verify your WhatsApp number first",
+      });
     }
-    const reminders = await Reminder.find({
-      phoneNumber: normalizePhone(phone),
-    }).sort({ eventDate: 1, urgency: -1 });
-    res.json(reminders);
+
+    const reminders = await Reminder.find({ phoneNumber })
+      .sort({ eventDate: 1, createdAt: -1 })
+      .lean();
+
+    return res.status(200).json(reminders);
+
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Get reminders error:", err);
+
+    return res.status(500).json({
+      message: "Unable to fetch reminders",
+    });
   }
 }
 
 // PATCH /api/reminders/:id
 async function updateReminder(req, res) {
   try {
-    const updated = await Reminder.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
-    if (!updated) return res.status(404).json({ message: "Reminder not found" });
-    res.json(updated);
+    const { id } = req.params;
+
+    const phoneNumber = getVerifiedPhone(req);
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid reminder ID",
+      });
+    }
+
+    if (!phoneNumber) {
+      return res.status(403).json({
+        message: "Link and verify your WhatsApp number first",
+      });
+    }
+
+    // Only allow modification of the reminder status.
+    const allowedFields = ["status"];
+
+    const updates = {};
+
+    for (const field of allowedFields) {
+      if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+        updates[field] = req.body[field];
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        message: "No valid fields provided",
+      });
+    }
+
+    if (
+      updates.status !== undefined &&
+      !["pending", "done"].includes(updates.status)
+    ) {
+      return res.status(400).json({
+        message: "Status must be pending or done",
+      });
+    }
+
+    // Update only if the reminder belongs to the authenticated user.
+    const updated = await Reminder.findOneAndUpdate(
+      {
+        _id: id,
+        phoneNumber: phoneNumber,
+      },
+      {
+        $set: updates,
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!updated) {
+      return res.status(404).json({
+        message: "Reminder not found",
+      });
+    }
+
+    return res.status(200).json(updated);
+
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Update reminder error:", err);
+
+    return res.status(500).json({
+      message: "Unable to update reminder",
+    });
   }
 }
 
 // DELETE /api/reminders/:id
 async function deleteReminder(req, res) {
   try {
-    const deleted = await Reminder.findByIdAndDelete(req.params.id);
-    if (!deleted) return res.status(404).json({ message: "Reminder not found" });
-    res.json({ message: "Deleted" });
+    const { id } = req.params;
+
+    const phoneNumber = getVerifiedPhone(req);
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({
+        message: "Invalid reminder ID",
+      });
+    }
+
+    if (!phoneNumber) {
+      return res.status(403).json({
+        message: "Link and verify your WhatsApp number first",
+      });
+    }
+
+    // Delete only if the reminder belongs to the authenticated user.
+    const deleted = await Reminder.findOneAndDelete({
+      _id: id,
+      phoneNumber: phoneNumber,
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        message: "Reminder not found",
+      });
+    }
+
+    return res.status(200).json({
+      message: "Reminder deleted successfully",
+    });
+
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Delete reminder error:", err);
+
+    return res.status(500).json({
+      message: "Unable to delete reminder",
+    });
   }
 }
 
-module.exports = { getReminders, updateReminder, deleteReminder };
+module.exports = {
+  getReminders,
+  updateReminder,
+  deleteReminder,
+};

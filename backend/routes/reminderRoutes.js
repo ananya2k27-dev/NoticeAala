@@ -1,10 +1,17 @@
+
 const express = require("express");
-const router = express.Router();
+
 const {
   getReminders,
   updateReminder,
   deleteReminder,
 } = require("../controllers/reminderController");
+
+const { requireAuth } = require("../middleware/authMiddleware");
+
+const router = express.Router();
+
+router.use(requireAuth);
 
 router.get("/", getReminders);
 router.patch("/:id", updateReminder);

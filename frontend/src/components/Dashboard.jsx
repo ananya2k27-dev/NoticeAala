@@ -31,12 +31,12 @@ export default function Dashboard({ phone, onLogout }) {
     setReminders((prev) =>
       prev.map((r) => (r._id === reminder._id ? { ...r, status: newStatus } : r))
     );
-    await updateReminder(reminder._id, { status: newStatus });
+    await updateReminder(reminder._id, { status: newStatus },phone);
   };
 
   const handleDelete = async (reminder) => {
     setReminders((prev) => prev.filter((r) => r._id !== reminder._id));
-    await deleteReminder(reminder._id);
+    await deleteReminder(reminder._id,phone);
   };
 
   const filtered =
