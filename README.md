@@ -1,4 +1,4 @@
-# Campus Circular Agent
+# Notice Aala
 
 Turns messy college notices (WhatsApp screenshots, notice-board photos, scanned PDFs) into structured reminders automatically — no manual data entry, no calendar linking. Forward a notice to a WhatsApp number, get a structured reminder back, and see it on a live dashboard.
 
